@@ -100,7 +100,21 @@ def call(Map config=[:]) {
             
           }
                 echo "BUILD ${BUILD_ENV}"
-                echo ""
+                echo "JOB_BASE_NAME.toLowerCase() = ${JOB_BASE_NAME.toLowerCase()}"
+                if (JOB_BASE_NAME.toLowerCase().matches(REGEX_DEPLOY)) {
+                    stage("wait for user to input text?") {
+                        def userval = getUserInputDockerTag(ENV_LIST, "grange/${AppID}-${AppName}", 50)
+                        echo userval.toString()
+                        BUILD_ENV = userval?.ENVIRONMENT
+                        imageTag = userval?.IMAGE_TAG
+                        CHANGENO = userval?.CHANGENO
+
+                        lowerEnv = BUILD_ENV.toLowerCase()
+                        println "lowercase env changed to = ${lowerEnv}"
+                        toemail = obj.BuildEmail?."${lowerEnv}" ? obj.BuildEmail?."${lowerEnv}" : obj.BuildEmail?.email
+                    }
+                    
+                }else if 
         }
       }
     }
