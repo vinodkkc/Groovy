@@ -114,7 +114,105 @@ def call(Map config=[:]) {
                         toemail = obj.BuildEmail?."${lowerEnv}" ? obj.BuildEmail?."${lowerEnv}" : obj.BuildEmail?.email
                     }
                     
-                }else if 
+                }else if (JOB_BASE_NAME.toLowerCase().endswith("test")
+                        || JOB_BASE_NAME.toLowerCase().endswith("hot_fix_proddeploy")
+                        || JOB_BASE_NAME.toLowerCase().endswith("autodeploy_uat")) {
+                    stage('wait for user to input text?') {
+                        ENV_LIST = [BUILD_ENV.toUpperCase()]
+                        def IMAGEBASE = "grange/${App_ID}-${BUILD_ENV.toLowerCase().replace('-test','')}-${AppName}"
+                        if (JOb_BASE_NAME.toLowerCase().endswith("hot_fix_prodeploy")) {
+                            ENV_LIST = [BUILD.ENV.toUpperCase()]
+                            IMAGEBASE = "grange/${AppID}-hot-fix-${AppName}"
+                        }
+                        if (JOB_BASE_NAME.toLowerCase().endswith("autodeploy_uat")) {
+                            ENV_LIST = "UAT"
+                            IMAGEBASE = "grange/${AppID}-hot-fix-${AppName}"
+                        }
+                        echo "Image has been tag: ${IMAGEBASE} "
+                        if (JOB_BASE_NAME.toLoweCase().contains("autodeploy")) {
+                            echo "Getting Latest Tag: ${IMAGEBASE}"
+                            imageTag = getLatestDockerTag{IMAGEBASE, 10}
+                            echo "Latest image Tag ${imageTag}"
+                        }else {
+                            // get user input
+                            def userval = getUserInputDockerTag(ENV_LIST, IMAGEBASE, 50)
+                            echo userval.toString()
+                            BUILD_ENV = userval?.ENVIRONMENT
+                            imageTag = userval?.IMAGE_TAG
+                        }
+                    }
+                        }else {
+                            properties(projectProperties)
+                            imageTag = "${env.BUILD_NUMBER}.${getCommitCount()}"
+                        }
+                    BUILD_ENV = "${BUILD_ENV.toUpperase()}"
+                    if (BUILD_ENV.equalsIgnoreCase('dev') ||BUILD_ENV.equalsIgnoreCase('csro')||BUILD_ENV.equalsIgnoreCase('p1')||
+                       BUILD_ENV.equalsIgnoreCase('csrolt') ||
+                       BUILD_ENV.equalsIgnoreCase('hot-fix') || JOB_BASE_NAME.toLowerCase().endswith("test")) {
+                    tagDockerApp = "${rtserver.url.toURL().host}/docker-local/grange/${AppID}-${BUILD_ENV.toLowerCase().replace('-test','')}-${AppName}:${ImageTag}"
+                       } else if(JOB_BASE_NAME.toLowerCase().endswith("hot_fix_proddeploy")) {// include hot-fix image name in the deploy 
+                        tagDockerApp = "${rtserver.urltoURL().host}/docker-local/grange/${AppID}-hot-fix-${AppName}:${imageTag}"
+                       }else {
+                        tagDockerApp="${rtServer.url.toURL().host}/docker-local/grange/${AppID}-${AppName}:${imageTag}"
+                       }
+
+                    echo "Docker TAG: ${tagDockerApp}"
+                    // if shouldbuild == true
+                    if ( BUILD_ENV.equalsIgnoreCase('dev') || BUILD_ENV.equalsIgnoreCase('sit') ||BUILD_ENV.equalsIgnoreCase('csro')||
+                        BUILD_ENV.equalsIgnoreCase('csrolt') ||
+                        BUILD_ENV.equalsIgnoreCase('p1') || BUILD_ENV.equalsIgnoreCase('hot-fix')) {
+                        //.Net core deployment
+                        if(buildType== 'core'){
+                            buildArgs = "--build-arg SCANNER_ARG=\"/key:gmcc:${sonarName} /name:${sonarPrefix}${sonarName} /d:sonar.branch.name={BUILD_ENV}\""
+                            println buildArgs
+                            DockerImageBuildAndUpload(rts: rtServer, rtd: rtDocker, bi: buildInfo, dockerapp: tagDockerApp,
+                                                     DOCKER_BUILD_DIR: "./Source/${APP_PATH}",dockerfile: DOCKER_FILE, buildargs:buildArgs, buildkit: buildkit)
+                            
+                        }
+                          else{//old scan
+                              echo("SonarScan file: ${projectPath}sonar-project.properties")
+                              SonarScanDocAuto(SONAR_PROP_FILE: "${projectPath}sonar-project.properties")
+                              DockerImageBuildAndUpload(rts: rtserver, rtd: rtDocker, bi: buildInfo, dockerapp: tagDockerApp,
+                                     DOCKER_BUILD_DIR:   "./Source/${APP_PATH}", dockerfile: DOCKER_FILE, buildkit: buildkit) 
+                          }
+                        XRAYScan(rt: rtServer, sc: scanConfig)
+                        ArtifactoryPromote(rt: rtserver, bi: buildInfo)
+                        }
+
+                        credentails = ['k8s-nprd']
+                        nodename = 'linux'
+                        if (BUILD_ENV.equalsIgnoreCase('prd')) {
+                            credntials =  ['k8s-oh-docauto','k8s-in-docauto' ]
+                            nodename='master' // only master server has Crown Jewels network access 
+                        }
+                        ENVIRONMENT_LIST=[BUILD_ENV.toUpperCase()]
+                          if (BUILD_ENV.equalsIsIgnoreCase('SIT')) {
+                              ENVIRONMENT_LIST << 'UAT-TA'
+                          }*/
+
+                          node(nodename) {
+                              checkout scm
+                              ENVIRONMENT_LIST.each { ENV ->
+                                  credentails.each { credentailsid ->
+                                     def values_file = "${env.WORKSPACE}/Source/${APP_PATH}/deployment/values-${ENV\.toLowerCase()}.yaml"
+                                      DeploywithHelm3(BUILD_ENV: ENV, NAMESPACE: NAMESPACE, dockerapp: tagDockerApp, AppName: AppName,
+                                                    DEPLOYMENT_DIR: "${env.WORKSPACE}/Deployment", credentailsid: credentailsid, values_file: values_file)
+                                  }
+                              }
+                          }
+                          (EmailNotification == true) && notifyBuild('SUCCESS', fromemail, toemail)
+                          keepThisBuild(imageTag + '-'+BUILD_ENV)
+                        }catch (err) {
+                            println err
+                            currentBuild.result = "FAILURE"
+                            notifyBuild(currentBuild.result, fromemail, toemail)
+                            throw err
+                        }
+                       
+                       
+                       }
+                    }
+                    }
         }
       }
     }
