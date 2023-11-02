@@ -208,11 +208,6 @@ def call(Map config=[:]) {
                             notifyBuild(currentBuild.result, fromemail, toemail)
                             throw err
                         }
-                       
-                       
-                       }
-                    }
-                    }
         }
       }
     }
